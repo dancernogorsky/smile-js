@@ -16,6 +16,10 @@ Via bower:
 
 	bower install ngyewch/smile-js --save
 
+Via npm:
+
+  npm install git+https://github.com/jonwagner/smile-js.git
+
 Setup
 -----
 Via bower:
