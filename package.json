@@ -1,6 +1,6 @@
 {
   "name": "smile-js",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Javascript Smile implementation.",
   "main": "dist/smile.min.js",
   "scripts": {

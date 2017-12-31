@@ -1,15 +1,121 @@
-/* global window, ArrayBuffer, DataView, Int16Array */
+/* global window, Uint8Array */
 
 (function(Smile, undefined) {
   'use strict';
 
-  Smile.littleEndian = (function() {
-    var buffer = new ArrayBuffer(2);
-    new DataView(buffer).setInt16(0, 256, true);
-    return (new Int16Array(buffer)[0] === 256);
-  })();
-}(window.Smile = window.Smile || {}));
+  var bitMask = [0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x3f, 0x7f, 0xff];
+  var shiftMultiplier = [1, 2, 4, 8, 16, 32, 64, 128];
 
+  Smile.DecoderStream = function(inputStream) {
+    this._inputStream = inputStream;
+  };
+
+  Smile.DecoderStream.prototype.isEof = function() {
+    return this._inputStream.isEof();
+  };
+
+  Smile.DecoderStream.prototype.read = function() {
+    return this._inputStream.read();
+  };
+
+  Smile.DecoderStream.prototype.peek = function() {
+    return this._inputStream.peek();
+  };
+
+  Smile.DecoderStream.prototype.readUnsignedVint = function() {
+    var value = 0,
+      bits = 0;
+
+    function safeLeftShift(n, shift) {
+      if ((bits + shift) < 32) {
+        value <<= shift;
+        value |= n & bitMask[shift];
+      } else {
+        value *= shiftMultiplier[shift];
+        value += n & bitMask[shift];
+      }
+      bits += shift;
+    }
+
+    while (true) {
+      var n = this._inputStream.read();
+      if (n & 0x80) {
+        safeLeftShift(n, 6);
+        return value;
+      } else {
+        safeLeftShift(n, 7);
+      }
+    }
+  };
+
+  Smile.DecoderStream.prototype.readSignedVint = function() {
+    return Smile.Decoder.decodeZigZag(this.readUnsignedVint());
+  };
+
+  Smile.DecoderStream.prototype.readAscii = function(len) {
+    return Smile.Decoder.decodeAscii(this._inputStream.readArray(len));
+  };
+
+  Smile.DecoderStream.prototype.readUtf8 = function(len) {
+    return Smile.Decoder.decodeUtf8(this._inputStream.readArray(len));
+  };
+
+  Smile.DecoderStream.prototype.readFloat32 = function() {
+    return Smile.Decoder.decodeFloat32(this.readFixedLengthBigEndianEncodedBits(32, true));
+  };
+
+  Smile.DecoderStream.prototype.readFloat64 = function() {
+    return Smile.Decoder.decodeFloat64(this.readFixedLengthBigEndianEncodedBits(64, true));
+  };
+
+  Smile.DecoderStream.prototype.readFixedLengthBigEndianEncodedBits = function(bits, adjustEndianness) {
+    var array = this._inputStream.readArray(Math.ceil(bits / 7));
+    return Smile.Decoder.decodeFixedLengthBigEndianEncodedBits(array, bits, adjustEndianness);
+  };
+
+  Smile.DecoderStream.prototype.readSafeBinary = function() {
+    var len = this.readUnsignedVint(),
+      array = this._inputStream.readArray(Math.ceil(len * 8 / 7));
+    return Smile.Decoder.decodeSafeBinaryEncodedBits(array, len * 8);
+  };
+
+  Smile.DecoderStream.prototype.readBigInt = function() {
+    var array = this.readSafeBinary(),
+      n = 0,
+      i;
+    for (i = 0; i < array.length; i++) {
+      n = (n * 256) + array[i];
+    }
+    return n;
+  };
+
+  Smile.DecoderStream.prototype.readBigDecimal = function() {
+    var scale = this.readSignedVint();
+    var magnitude = this.readBigInt();
+    return magnitude * Math.pow(10, scale);
+  };
+
+  Smile.DecoderStream.prototype.readLongString = function() {
+    var buffer = [], c;
+    while (true) {
+      c = this._inputStream.read();
+      if (c === 0xfc) {
+        break;
+      }
+      buffer.push(c);
+    }
+    return buffer;
+  };
+
+  Smile.DecoderStream.prototype.readLongAscii = function() {
+    return Smile.Decoder.decodeAscii(this.readLongString());
+  };
+
+  Smile.DecoderStream.prototype.readLongUtf8 = function() {
+    return Smile.Decoder.decodeUtf8(this.readLongString());
+  };
+
+}(window.Smile = window.Smile || {}));
 /* global window, ArrayBuffer, Uint8Array, Float32Array, Float64Array */
 
 (function(Smile, undefined) {
@@ -166,140 +272,6 @@
     return outputView;
   };
 }(window.Smile = window.Smile || {}));
-
-/* global window, Uint8Array */
-
-(function(Smile, undefined) {
-  'use strict';
-
-  var bitMask = [0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x3f, 0x7f, 0xff];
-  var shiftMultiplier = [1, 2, 4, 8, 16, 32, 64, 128];
-
-  Smile.DecoderStream = function(inputStream) {
-    this._inputStream = inputStream;
-  };
-
-  Smile.DecoderStream.prototype.isEof = function() {
-    return this._inputStream.isEof();
-  };
-
-  Smile.DecoderStream.prototype.read = function() {
-    return this._inputStream.read();
-  };
-
-  Smile.DecoderStream.prototype.peek = function() {
-    return this._inputStream.peek();
-  };
-
-  Smile.DecoderStream.prototype.readUnsignedVint = function() {
-    var value = 0,
-      bits = 0;
-
-    function safeLeftShift(n, shift) {
-      if ((bits + shift) < 32) {
-        value <<= shift;
-        value |= n & bitMask[shift];
-      } else {
-        value *= shiftMultiplier[shift];
-        value += n & bitMask[shift];
-      }
-      bits += shift;
-    }
-
-    while (true) {
-      var n = this._inputStream.read();
-      if (n & 0x80) {
-        safeLeftShift(n, 6);
-        return value;
-      } else {
-        safeLeftShift(n, 7);
-      }
-    }
-  };
-
-  Smile.DecoderStream.prototype.readSignedVint = function() {
-    return Smile.Decoder.decodeZigZag(this.readUnsignedVint());
-  };
-
-  Smile.DecoderStream.prototype.readAscii = function(len) {
-    return Smile.Decoder.decodeAscii(this._inputStream.readArray(len));
-  };
-
-  Smile.DecoderStream.prototype.readUtf8 = function(len) {
-    return Smile.Decoder.decodeUtf8(this._inputStream.readArray(len));
-  };
-
-  Smile.DecoderStream.prototype.readFloat32 = function() {
-    return Smile.Decoder.decodeFloat32(this.readFixedLengthBigEndianEncodedBits(32, true));
-  };
-
-  Smile.DecoderStream.prototype.readFloat64 = function() {
-    return Smile.Decoder.decodeFloat64(this.readFixedLengthBigEndianEncodedBits(64, true));
-  };
-
-  Smile.DecoderStream.prototype.readFixedLengthBigEndianEncodedBits = function(bits, adjustEndianness) {
-    var array = this._inputStream.readArray(Math.ceil(bits / 7));
-    return Smile.Decoder.decodeFixedLengthBigEndianEncodedBits(array, bits, adjustEndianness);
-  };
-
-  Smile.DecoderStream.prototype.readSafeBinary = function() {
-    var len = this.readUnsignedVint(),
-      array = this._inputStream.readArray(Math.ceil(len * 8 / 7));
-    return Smile.Decoder.decodeSafeBinaryEncodedBits(array, len * 8);
-  };
-
-  Smile.DecoderStream.prototype.readBigInt = function() {
-    var array = this.readSafeBinary(),
-      n = 0,
-      i;
-    for (i = 0; i < array.length; i++) {
-      n = (n * 256) + array[i];
-    }
-    return n;
-  };
-
-  Smile.DecoderStream.prototype.readBigDecimal = function() {
-    var scale = this.readSignedVint();
-    var magnitude = this.readBigInt();
-    return magnitude * Math.pow(10, scale);
-  };
-
-  Smile.DecoderStream.prototype.readLongString = function() {
-    var buffer = new Uint8Array(), c;
-    while (true) {
-      c = this._inputStream.read();
-      if (c === 0xfc) {
-        break;
-      }
-      buffer[buffer.length] = c;
-    }
-    return buffer;
-  };
-
-  Smile.DecoderStream.prototype.readLongAscii = function() {
-    return Smile.Decoder.decodeAscii(this.readLongString());
-  };
-
-  Smile.DecoderStream.prototype.readLongUtf8 = function() {
-    return Smile.Decoder.decodeUtf8(this.readLongString());
-  };
-
-}(window.Smile = window.Smile || {}));
-
-/* global window */
-
-(function (Smile, undefined) {
-  'use strict';
-
-  Smile.SmileError = function(message) {
-    this.name = 'SmileError';
-    this.message = message;
-  };
-
-  Smile.SmileError.prototype = Object.create(Error.prototype);
-  Smile.SmileError.prototype.constructor = Smile.SmileError;
-}(window.Smile = window.Smile || {}));
-
 /* global window, ArrayBuffer, Uint8Array */
 
 (function (Smile, undefined) {
@@ -358,7 +330,62 @@
     this._index += n;
   };
 }(window.Smile = window.Smile || {}));
+/* global window */
 
+(function (Smile, undefined) {
+  'use strict';
+
+  Smile.SmileError = function(message) {
+    this.name = 'SmileError';
+    this.message = message;
+  };
+
+  Smile.SmileError.prototype = Object.create(Error.prototype);
+  Smile.SmileError.prototype.constructor = Smile.SmileError;
+}(window.Smile = window.Smile || {}));
+/* global window */
+
+(function (Smile, undefined) {
+  'use strict';
+
+  Smile.SharedStringBuffer = function(enabled, maxStrings) {
+    this._enabled = enabled;
+    this._maxStrings = maxStrings;
+    this._strings = [];
+  };
+
+  Smile.SharedStringBuffer.prototype.addString = function(s) {
+    if (!this._enabled) {
+      return s;
+    }
+    if (this._strings.length >= this._maxStrings) {
+      this._strings.length = 0;
+    }
+    this._strings.push(s);
+    return s;
+  };
+
+  Smile.SharedStringBuffer.prototype.getString = function(index) {
+    if (!this._enabled) {
+      throw new Smile.SmileError('Shared strings are not enabled.');
+    }
+    if (index >= this._strings.length) {
+      throw new Smile.SmileError('Shared string reference out of range.');
+    }
+    return this._strings[index];
+  };
+}(window.Smile = window.Smile || {}));
+/* global window, ArrayBuffer, DataView, Int16Array */
+
+(function(Smile, undefined) {
+  'use strict';
+
+  Smile.littleEndian = (function() {
+    var buffer = new ArrayBuffer(2);
+    new DataView(buffer).setInt16(0, 256, true);
+    return (new Int16Array(buffer)[0] === 256);
+  })();
+}(window.Smile = window.Smile || {}));
 /* global window, console */
 
 (function(Smile, undefined) {
@@ -462,8 +489,9 @@
         return value;
       } else if ((token >= 0xec) && (token <= 0xef)) { // Shared String reference, long
         reference = ((token & 0x03) << 8) | decoderStream.read();
-        if (reference < 64) {
-          throw new Smile.SmileError('Invalid long shared value name reference.');
+        // 32, as _writeSharedStringValueReference checks for that
+        if (reference < 31) {
+                  throw new Smile.SmileError('Invalid long shared value name reference.');
         }
         value = sharedStringValues.getString(reference);
         pushDebugToken('LONGSTRREF', value);
@@ -514,7 +542,9 @@
         tokenClass = token >> 5,
         value;
       if (tokenClass === 0) { // Short Shared Value String reference (single byte)
-        value = sharedStringValues.getString(token & 0x1f);
+        // subtract 1, as _writeSharedStringValueReference adds 1 for short refs
+
+        value = sharedStringValues.getString((token & 0x1f) - 1);
         pushDebugToken('SHORTSTRREF', value);
         return value;
       } else if (tokenClass === 1) { // Simple literals, numbers
@@ -622,37 +652,3 @@
     return new ParserContext(opts).parse(buffer);
   };
 }(window.Smile = window.Smile || {}));
-
-/* global window */
-
-(function (Smile, undefined) {
-  'use strict';
-
-  Smile.SharedStringBuffer = function(enabled, maxStrings) {
-    this._enabled = enabled;
-    this._maxStrings = maxStrings;
-    this._strings = [];
-  };
-
-  Smile.SharedStringBuffer.prototype.addString = function(s) {
-    if (!this._enabled) {
-      return s;
-    }
-    if (this._strings.length >= this._maxStrings) {
-      this._strings.length = 0;
-    }
-    this._strings.push(s);
-    return s;
-  };
-
-  Smile.SharedStringBuffer.prototype.getString = function(index) {
-    if (!this._enabled) {
-      throw new Smile.SmileError('Shared strings are not enabled.');
-    }
-    if (index >= this._strings.length) {
-      throw new Smile.SmileError('Shared string reference out of range.');
-    }
-    return this._strings[index];
-  };
-}(window.Smile = window.Smile || {}));
-

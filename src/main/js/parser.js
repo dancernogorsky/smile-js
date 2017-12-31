@@ -101,8 +101,9 @@
         return value;
       } else if ((token >= 0xec) && (token <= 0xef)) { // Shared String reference, long
         reference = ((token & 0x03) << 8) | decoderStream.read();
-        if (reference < 64) {
-          throw new Smile.SmileError('Invalid long shared value name reference.');
+        // 32, as _writeSharedStringValueReference checks for that
+        if (reference < 31) {
+                  throw new Smile.SmileError('Invalid long shared value name reference.');
         }
         value = sharedStringValues.getString(reference);
         pushDebugToken('LONGSTRREF', value);
@@ -153,7 +154,9 @@
         tokenClass = token >> 5,
         value;
       if (tokenClass === 0) { // Short Shared Value String reference (single byte)
-        value = sharedStringValues.getString(token & 0x1f);
+        // subtract 1, as _writeSharedStringValueReference adds 1 for short refs
+
+        value = sharedStringValues.getString((token & 0x1f) - 1);
         pushDebugToken('SHORTSTRREF', value);
         return value;
       } else if (tokenClass === 1) { // Simple literals, numbers
